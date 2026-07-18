@@ -1,5 +1,5 @@
 diff --git a/agent/insights.py b/agent/insights.py
-index 086150c..3dfe7b1 100644
+index 086150c27..3dfe7b178 100644
 --- a/agent/insights.py
 +++ b/agent/insights.py
 @@ -1037,56 +1037,73 @@ class InsightsEngine:
@@ -89,26 +89,20 @@ index 086150c..3dfe7b1 100644
  
          return "\n".join(lines)
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 9223689..6279c84 100644
+index 9223689bd..27f3fbd08 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
-@@ -698,7 +698,14 @@ class GatewaySlashCommandsMixin:
+@@ -698,7 +698,8 @@ class GatewaySlashCommandsMixin:
              t("gateway.status.platforms", platforms=', '.join(connected_platforms)),
          ])
  
 -        return "\n".join(lines)
 +        # ponytail: render as GFM table so Telegram converts it to a native rich table.
-+        table_rows = []
-+        for line in lines:
-+            if not line or ":" not in line:
-+                continue
-+            key, value = line.split(":", 1)
-+            table_rows.append(f"| {key.strip()} | {value.strip()} |")
-+        return "\n".join(["| Key | Value |", "|-----|-------|"] + table_rows)
++        return self._lines_to_gfm_table(lines)
  
      @staticmethod
      def _redact_matrix_session_key(session_key: str) -> str:
-@@ -707,6 +714,28 @@ class GatewaySlashCommandsMixin:
+@@ -707,6 +708,28 @@ class GatewaySlashCommandsMixin:
          digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
          return f"sha256:{digest}"
  
@@ -137,7 +131,7 @@ index 9223689..6279c84 100644
      def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
          """Best-effort origin lookup for gateway session IDs."""
          lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
-@@ -1081,7 +1110,31 @@ class GatewaySlashCommandsMixin:
+@@ -1081,7 +1104,31 @@ class GatewaySlashCommandsMixin:
              lines.append("")
              lines.append(t("gateway.agents.none"))
  
@@ -170,7 +164,7 @@ index 9223689..6279c84 100644
  
      async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
          """Handle /stop command - interrupt a running agent.
-@@ -1193,28 +1246,22 @@ class GatewaySlashCommandsMixin:
+@@ -1193,28 +1240,22 @@ class GatewaySlashCommandsMixin:
              return None
  
          if action == "list":
@@ -213,7 +207,7 @@ index 9223689..6279c84 100644
              return "\n".join(lines)
  
          if action in {"pause", "resume"}:
-@@ -4102,7 +4149,7 @@ class GatewaySlashCommandsMixin:
+@@ -4102,7 +4143,7 @@ class GatewaySlashCommandsMixin:
              lines.append("")
              lines.append(f"Top up: {view.topup_url}")
              lines.append("Complete your top-up in the browser — credits will appear in /credits shortly.")
@@ -222,7 +216,7 @@ index 9223689..6279c84 100644
  
      def _context_breakdown_lines(self, agent, source) -> list[str]:
          """Render the per-category context breakdown for /usage.
-@@ -4287,7 +4334,7 @@ class GatewaySlashCommandsMixin:
+@@ -4287,7 +4328,7 @@ class GatewaySlashCommandsMixin:
                  lines.append("")
                  lines.extend(credits_lines)
  
@@ -231,7 +225,7 @@ index 9223689..6279c84 100644
  
          # No agent at all -- check session history for a rough count
          session_entry = await self.async_session_store.get_or_create_session(source)
-@@ -4308,7 +4355,7 @@ class GatewaySlashCommandsMixin:
+@@ -4308,7 +4349,7 @@ class GatewaySlashCommandsMixin:
              if credits_lines:
                  lines.append("")
                  lines.extend(credits_lines)
@@ -240,7 +234,7 @@ index 9223689..6279c84 100644
          if account_lines or credits_lines:
              # account-only, credits-only, or both — joined with a blank divider.
              parts = list(account_lines)
-@@ -4316,7 +4363,7 @@ class GatewaySlashCommandsMixin:
+@@ -4316,7 +4357,7 @@ class GatewaySlashCommandsMixin:
                  if parts:
                      parts.append("")
                  parts.extend(credits_lines)
@@ -249,7 +243,7 @@ index 9223689..6279c84 100644
          return t("gateway.usage.no_data")
  
      async def _handle_insights_command(self, event: MessageEvent) -> str:
-@@ -4554,14 +4601,13 @@ class GatewaySlashCommandsMixin:
+@@ -4554,14 +4595,13 @@ class GatewaySlashCommandsMixin:
              )
  
          lines = [f"**Skill Bundles** ({len(bundles)} installed):", ""]
@@ -269,7 +263,7 @@ index 9223689..6279c84 100644
          lines.append("Invoke a bundle with `/<slug>` to load all its skills.")
          return "\n".join(lines)
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index 10f8fbf..4ac9bba 100644
+index 10f8fbf04..4ac9bbad0 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -179,6 +179,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
@@ -283,8 +277,114 @@ index 10f8fbf..4ac9bba 100644
      CommandDef("memory", "Review pending memory writes / toggle the approval gate",
                 "Tools & Skills",
                 args_hint="[pending|approve|reject|approval] [id|on|off]",
+diff --git a/hermes_cli/kanban.py b/hermes_cli/kanban.py
+index 6f0766a73..2ab2708b8 100644
+--- a/hermes_cli/kanban.py
++++ b/hermes_cli/kanban.py
+@@ -1087,9 +1087,11 @@ def _cmd_boards_list(args: argparse.Namespace) -> int:
+     if not boards:
+         print("(no boards — create one with `hermes kanban boards create <slug>`)")
+         return 0
+-    print(f"{'':2s}  {'SLUG':24s}  {'NAME':28s}  COUNTS")
++    # ponytail: render boards as a GFM table for Telegram rich rendering.
++    print("| Current | Slug | Name | Counts |")
++    print("|---------|------|------|--------|")
+     for b in boards:
+-        marker = "●" if b["is_current"] else " "
++        marker = "●" if b["is_current"] else ""
+         counts = b["counts"] or {}
+         counts_str = (
+             ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+@@ -1098,9 +1100,8 @@ def _cmd_boards_list(args: argparse.Namespace) -> int:
+         name = b.get("name") or ""
+         if b.get("archived"):
+             name += " [archived]"
+-        print(f"{marker:2s}  {b['slug']:24s}  {name:28s}  {counts_str}")
+-    print()
+-    print(f"Current board: {current}")
++        print(f"| {marker} | `{b['slug']}` | {name} | {counts_str} |")
++    print(f"\nCurrent board: `{current}`")
+     if len(boards) > 1:
+         print("Switch boards with `hermes kanban boards switch <slug>`.")
+     return 0
+@@ -1460,8 +1461,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
+     if not tasks:
+         print("(no matching tasks)")
+         return 0
++    # ponytail: render tasks as a GFM table for Telegram rich rendering.
++    print("| Status | ID | Assignee | Title |")
++    print("|--------|----|----------|-------|")
+     for t in tasks:
+-        print(_fmt_task_line(t))
++        icon = _STATUS_ICONS.get(t.status, "?")
++        assignee = t.assignee or "(unassigned)"
++        print(f"| {icon} {t.status} | `{t.id}` | {assignee} | {t.title} |")
+     return 0
+ 
+ 
+@@ -1527,25 +1533,24 @@ def _cmd_show(args: argparse.Namespace) -> int:
+         print(json.dumps(payload, indent=2, ensure_ascii=False))
+         return 0
+ 
+-    print(f"Task {task.id}: {task.title}")
+-    print(f"  status:    {task.status}")
+-    print(f"  assignee:  {task.assignee or '-'}")
++    # ponytail: render core task fields as a GFM table for Telegram rich rendering.
++    print(f"### `{task.id}`: {task.title}")
++    print("| Field | Value |")
++    print("|-------|-------|")
++    print(f"| status | {task.status} |")
++    print(f"| assignee | {task.assignee or '-'} |")
+     if task.tenant:
+-        print(f"  tenant:    {task.tenant}")
+-    print(f"  workspace: {task.workspace_kind}" +
+-          (f" @ {task.workspace_path}" if task.workspace_path else ""))
++        print(f"| tenant | {task.tenant} |")
++    ws = task.workspace_kind + (f" @ {task.workspace_path}" if task.workspace_path else "")
++    print(f"| workspace | {ws} |")
+     if task.branch_name:
+-        print(f"  branch:    {task.branch_name}")
++        print(f"| branch | {task.branch_name} |")
+     if task.skills:
+-        print(f"  skills:    {', '.join(task.skills)}")
++        print(f"| skills | {', '.join(task.skills)} |")
+     if task.model_override:
+-        print(f"  model:     {task.model_override}")
+-    # Effective retry threshold. Show the per-task override if set,
+-    # otherwise the dispatcher's resolved value from config (or the
+-    # default if config doesn't set it either). Helps operators see
+-    # why a task auto-blocked earlier/later than they expected.
++        print(f"| model | {task.model_override} |")
+     if task.max_retries is not None:
+-        print(f"  max-retries: {task.max_retries} (task)")
++        print(f"| max-retries | {task.max_retries} (task) |")
+     else:
+         try:
+             from hermes_cli.config import load_config
+@@ -1554,10 +1559,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
+         except Exception:
+             cfg_val = None
+         if cfg_val is not None and int(cfg_val) != kb.DEFAULT_FAILURE_LIMIT:
+-            print(f"  max-retries: {int(cfg_val)} (config kanban.failure_limit)")
++            print(f"| max-retries | {int(cfg_val)} (config) |")
+         else:
+-            print(f"  max-retries: {kb.DEFAULT_FAILURE_LIMIT} (default)")
+-    print(f"  created:   {_fmt_ts(task.created_at)} by {task.created_by or '-'}")
++            print(f"| max-retries | {kb.DEFAULT_FAILURE_LIMIT} (default) |")
++    print(f"| created | {_fmt_ts(task.created_at)} by {task.created_by or '-'} |")
++    if task.started_at:
++        print(f"| started | {_fmt_ts(task.started_at)} |")
++    if task.completed_at:
++        print(f"| completed | {_fmt_ts(task.completed_at)} |")
++    if parents:
++        print(f"| parents | {', '.join(parents)} |")
++    if children:
++        print(f"| children | {', '.join(children)} |")
+ 
+     # Diagnostics section — surface active distress signals at the top
+     # of show output so CLI users see them before scrolling through
 diff --git a/hermes_cli/session_listing.py b/hermes_cli/session_listing.py
-index 8ce2a71..bee7e0b 100644
+index 8ce2a7158..bee7e0ba2 100644
 --- a/hermes_cli/session_listing.py
 +++ b/hermes_cli/session_listing.py
 @@ -1,113 +1,115 @@
@@ -517,7 +617,7 @@ index 8ce2a71..bee7e0b 100644
 +    lines.append("More: `/sessions all`, `/sessions full`, `/sessions search <query>`.")
 +    return "\n".join(lines)
 diff --git a/hermes_cli/suggestions_cmd.py b/hermes_cli/suggestions_cmd.py
-index 0c0fd5a..2b5e592 100644
+index 0c0fd5a3e..2b5e59226 100644
 --- a/hermes_cli/suggestions_cmd.py
 +++ b/hermes_cli/suggestions_cmd.py
 @@ -1,153 +1,154 @@
@@ -829,7 +929,7 @@ index 0c0fd5a..2b5e592 100644
 +        "  /suggestions clear        housekeeping"
 +    )
 diff --git a/hermes_cli/write_approval_commands.py b/hermes_cli/write_approval_commands.py
-index 5f399e0..1c89547 100644
+index 5f399e0cc..1c89547a9 100644
 --- a/hermes_cli/write_approval_commands.py
 +++ b/hermes_cli/write_approval_commands.py
 @@ -1,209 +1,212 @@
@@ -1255,7 +1355,7 @@ index 5f399e0..1c89547 100644
 +        return f"Failed to set {subsystem}.write_approval: {e}"
 +    return f"{subsystem}.write_approval set to '{'on' if enabled else 'off'}'."
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 7f451f8..20ae8f0 100644
+index 7f451f8c4..20ae8f05e 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,8 @@ import logging
