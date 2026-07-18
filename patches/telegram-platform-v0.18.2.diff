@@ -89,7 +89,7 @@ index 086150c..3dfe7b1 100644
  
          return "\n".join(lines)
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 9223689..5acfd90 100644
+index 9223689..6279c84 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -698,7 +698,14 @@ class GatewaySlashCommandsMixin:
@@ -125,10 +125,10 @@ index 9223689..5acfd90 100644
 +            if not line or ":" not in line:
 +                continue
 +            key, value = line.split(":", 1)
-+            # Strip markdown bold/italic/spoiler markers from the key so the
-+            # fallback MarkdownV2/plain-text view doesn't show stray stars.
-+            key = _re.sub(r"[*_~|]+", "", key).strip()
-+            value = value.strip()
++            # Strip markdown bold/italic/spoiler markers so Telegram's fallback
++            # plain text (and HTML after markdown conversion) doesn't show stars.
++            key = _re.sub(r"[*_~]+", "", key).strip()
++            value = _re.sub(r"[*_~]+", "", value).strip()
 +            rows.append(f"| {key} | {value} |")
 +        if not rows:
 +            return "\n".join(lines)
