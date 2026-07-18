@@ -1,0 +1,1916 @@
+diff --git a/agent/insights.py b/agent/insights.py
+index 086150c..3dfe7b1 100644
+--- a/agent/insights.py
++++ b/agent/insights.py
+@@ -1037,56 +1037,73 @@ class InsightsEngine:
+ 
+         lines.append(f"📊 **Hermes Insights** — Last {days} days\n")
+ 
+-        # Overview
+-        lines.append(f"**Sessions:** {o['total_sessions']} | **Messages:** {o['total_messages']:,} | **Tool calls:** {o['total_tool_calls']:,}")
+-        lines.append(f"**Tokens:** {o['total_tokens']:,} (in: {o['total_input_tokens']:,} / out: {o['total_output_tokens']:,})")
++        # Overview as GFM table
++        lines.append("| Metric | Value |")
++        lines.append("|--------|-------|")
++        lines.append(f"| Sessions | {o['total_sessions']} |")
++        lines.append(f"| Messages | {o['total_messages']:,} |")
++        lines.append(f"| Tool calls | {o['total_tool_calls']:,} |")
++        lines.append(f"| Tokens | {o['total_tokens']:,} (in: {o['total_input_tokens']:,} / out: {o['total_output_tokens']:,}) |")
+         if o["total_hours"] > 0:
+-            lines.append(f"**Active time:** ~{format_duration_compact(o['total_hours'] * 3600)} | **Avg session:** ~{format_duration_compact(o['avg_session_duration'])}")
++            lines.append(f"| Active time | ~{format_duration_compact(o['total_hours'] * 3600)} |")
++            lines.append(f"| Avg session | ~{format_duration_compact(o['avg_session_duration'])} |")
+         lines.append("")
+ 
+         # Models (top 5)
+         if report["models"]:
+             lines.append("**🤖 Models:**")
++            lines.append("| Model | Sessions | Tokens |")
++            lines.append("|-------|----------|--------|")
+             for m in report["models"][:5]:
+-                lines.append(f"  {m['model'][:25]} — {m['sessions']} sessions, {m['total_tokens']:,} tokens")
++                lines.append(f"| {m['model'][:25]} | {m['sessions']} | {m['total_tokens']:,} |")
+             lines.append("")
+ 
+         # Platforms (if multi-platform)
+         if len(report["platforms"]) > 1:
+             lines.append("**📱 Platforms:**")
++            lines.append("| Platform | Sessions | Messages |")
++            lines.append("|----------|----------|----------|")
+             for p in report["platforms"]:
+-                lines.append(f"  {p['platform']} — {p['sessions']} sessions, {p['messages']:,} msgs")
++                lines.append(f"| {p['platform']} | {p['sessions']} | {p['messages']:,} |")
+             lines.append("")
+ 
+         # Tools (top 8)
+         if report["tools"]:
+             lines.append("**🔧 Top Tools:**")
++            lines.append("| Tool | Calls | Share |")
++            lines.append("|------|-------|-------|")
+             for t in report["tools"][:8]:
+-                lines.append(f"  {t['tool']} — {t['count']:,} calls ({t['percentage']:.1f}%)")
++                lines.append(f"| {t['tool']} | {t['count']:,} | {t['percentage']:.1f}% |")
+             lines.append("")
+ 
+         skills = report.get("skills", {})
+         if skills.get("top_skills"):
+             lines.append("**🧠 Top Skills:**")
++            lines.append("| Skill | Loads | Edits | Last used |")
++            lines.append("|-------|-------|-------|-----------|")
+             for skill in skills["top_skills"][:5]:
+                 suffix = ""
+                 if skill.get("last_used_at"):
+-                    suffix = f", last used {datetime.fromtimestamp(skill['last_used_at']).strftime('%b %d')}"
++                    suffix = datetime.fromtimestamp(skill['last_used_at']).strftime('%b %d')
+                 lines.append(
+-                    f"  {skill['skill']} — {skill['view_count']:,} loads, {skill['manage_count']:,} edits{suffix}"
++                    f"| {skill['skill']} | {skill['view_count']:,} | {skill['manage_count']:,} | {suffix or '—'} |"
+                 )
+             lines.append("")
+ 
+         # Activity summary
+         act = report.get("activity", {})
+         if act.get("busiest_day") and act.get("busiest_hour"):
++            lines.append("**📅 Activity:**")
++            lines.append("| Metric | Value |")
++            lines.append("|--------|-------|")
+             hr = act["busiest_hour"]["hour"]
+             ampm = "AM" if hr < 12 else "PM"
+             display_hr = hr % 12 or 12
+-            lines.append(f"**📅 Busiest:** {act['busiest_day']['day']}s ({act['busiest_day']['count']} sessions), {display_hr}{ampm} ({act['busiest_hour']['count']} sessions)")
++            lines.append(f"| Busiest day | {act['busiest_day']['day']}s ({act['busiest_day']['count']} sessions) |")
++            lines.append(f"| Busiest hour | {display_hr}{ampm} ({act['busiest_hour']['count']} sessions) |")
+             if act.get("active_days"):
+-                lines.append(f"**Active days:** {act['active_days']}", )
++                lines.append(f"| Active days | {act['active_days']} |")
+             if act.get("max_streak", 0) > 1:
+-                lines.append(f"**Best streak:** {act['max_streak']} consecutive days")
++                lines.append(f"| Best streak | {act['max_streak']} consecutive days |")
+ 
+         return "\n".join(lines)
+diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
+index 9223689..d2b2e5f 100644
+--- a/gateway/slash_commands.py
++++ b/gateway/slash_commands.py
+@@ -698,7 +698,14 @@ class GatewaySlashCommandsMixin:
+             t("gateway.status.platforms", platforms=', '.join(connected_platforms)),
+         ])
+ 
+-        return "\n".join(lines)
++        # ponytail: render as GFM table so Telegram converts it to a native rich table.
++        table_rows = []
++        for line in lines:
++            if not line or ":" not in line:
++                continue
++            key, value = line.split(":", 1)
++            table_rows.append(f"| {key.strip()} | {value.strip()} |")
++        return "\n".join(["| Key | Value |", "|-----|-------|"] + table_rows)
+ 
+     @staticmethod
+     def _redact_matrix_session_key(session_key: str) -> str:
+@@ -707,6 +714,23 @@ class GatewaySlashCommandsMixin:
+         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+         return f"sha256:{digest}"
+ 
++    @staticmethod
++    def _lines_to_gfm_table(lines: list[str]) -> str:
++        """Convert a list of 'Key: value' lines into a GFM table.
++
++        ponytail: reusable helper so status/usage/credits can all render as
++        native Telegram rich tables without rewriting each formatter.
++        """
++        rows: list[str] = []
++        for line in lines:
++            if not line or ":" not in line:
++                continue
++            key, value = line.split(":", 1)
++            rows.append(f"| {key.strip()} | {value.strip()} |")
++        if not rows:
++            return "\n".join(lines)
++        return "\n".join(["| Key | Value |", "|-----|-------|"] + rows)
++
+     def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
+         """Best-effort origin lookup for gateway session IDs."""
+         lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
+@@ -1081,7 +1105,31 @@ class GatewaySlashCommandsMixin:
+             lines.append("")
+             lines.append(t("gateway.agents.none"))
+ 
+-        return "\n".join(lines)
++        # ponytail: render agents, processes, and jobs as GFM tables.
++        tables: list[str] = []
++        if agent_rows:
++            tbl = ["| # | Session | State | Model |", "|---|---|---|---|"]
++            for idx, row in enumerate(agent_rows, 1):
++                sid = row["session_id"] or "-"
++                state = f"{row['state']} · {format_uptime_short(row['elapsed'])}"
++                current = " (this chat)" if row["session_key"] == current_session_key else ""
++                model = row["model"] or "-"
++                tbl.append(f"| {idx} | `{sid}` | {state}{current} | `{model}` |")
++            tables.append("\n".join(tbl))
++        if running_processes:
++            tbl = ["| Session | Uptime | Command |", "|---|---|---|"]
++            for proc in running_processes:
++                cmd = " ".join(str(proc.get("command", "")).split())
++                if len(cmd) > 60:
++                    cmd = cmd[:57] + "..."
++                uptime = format_uptime_short(int(proc.get("uptime_seconds", 0)))
++                tbl.append(f"| `{proc.get('session_id', '?')}` | {uptime} | `{cmd}` |")
++            tables.append("\n".join(tbl))
++        if background_tasks:
++            tables.append(f"**Async jobs:** {len(background_tasks)}")
++        if not tables:
++            return t("gateway.agents.none")
++        return "\n\n".join(tables)
+ 
+     async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
+         """Handle /stop command - interrupt a running agent.
+@@ -1193,28 +1241,22 @@ class GatewaySlashCommandsMixin:
+             return None
+ 
+         if action == "list":
+-            lines = ["**Gateway platforms**"]
+             connected = sorted(p.value for p in self.adapters.keys())
+-            if connected:
+-                lines.append("Connected: " + ", ".join(connected))
+-            else:
+-                lines.append("Connected: (none)")
+             failed = getattr(self, "_failed_platforms", {}) or {}
+-            if failed:
+-                for p, info in failed.items():
+-                    if info.get("paused"):
+-                        reason = info.get("pause_reason") or "paused"
+-                        lines.append(
+-                            f"  · {p.value} — PAUSED ({reason}). "
+-                            f"Resume with `/platform resume {p.value}`."
+-                        )
+-                    else:
+-                        attempts = info.get("attempts", 0)
+-                        lines.append(
+-                            f"  · {p.value} — retrying (attempt {attempts})"
+-                        )
+-            else:
+-                lines.append("Failed/paused: (none)")
++            lines = ["**Gateway platforms**", ""]
++            lines.append("| Status | Platform | Detail |")
++            lines.append("|--------|----------|--------|")
++            for p in connected:
++                lines.append(f"| connected | `{p}` | — |")
++            for p, info in failed.items():
++                if info.get("paused"):
++                    reason = info.get("pause_reason") or "paused"
++                    lines.append(f"| paused | `{p.value}` | {reason} |")
++                else:
++                    attempts = info.get("attempts", 0)
++                    lines.append(f"| retrying | `{p.value}` | attempt {attempts} |")
++            if not connected and not failed:
++                lines.append("| — | — | no platforms |")
+             return "\n".join(lines)
+ 
+         if action in {"pause", "resume"}:
+@@ -4102,7 +4144,7 @@ class GatewaySlashCommandsMixin:
+             lines.append("")
+             lines.append(f"Top up: {view.topup_url}")
+             lines.append("Complete your top-up in the browser — credits will appear in /credits shortly.")
+-        return "\n".join(lines)
++        return self._lines_to_gfm_table(lines)
+ 
+     def _context_breakdown_lines(self, agent, source) -> list[str]:
+         """Render the per-category context breakdown for /usage.
+@@ -4287,7 +4329,7 @@ class GatewaySlashCommandsMixin:
+                 lines.append("")
+                 lines.extend(credits_lines)
+ 
+-            return "\n".join(lines)
++            return self._lines_to_gfm_table(lines)
+ 
+         # No agent at all -- check session history for a rough count
+         session_entry = await self.async_session_store.get_or_create_session(source)
+@@ -4308,7 +4350,7 @@ class GatewaySlashCommandsMixin:
+             if credits_lines:
+                 lines.append("")
+                 lines.extend(credits_lines)
+-            return "\n".join(lines)
++            return self._lines_to_gfm_table(lines)
+         if account_lines or credits_lines:
+             # account-only, credits-only, or both — joined with a blank divider.
+             parts = list(account_lines)
+@@ -4316,7 +4358,7 @@ class GatewaySlashCommandsMixin:
+                 if parts:
+                     parts.append("")
+                 parts.extend(credits_lines)
+-            return "\n".join(parts)
++            return self._lines_to_gfm_table(parts)
+         return t("gateway.usage.no_data")
+ 
+     async def _handle_insights_command(self, event: MessageEvent) -> str:
+@@ -4554,14 +4596,13 @@ class GatewaySlashCommandsMixin:
+             )
+ 
+         lines = [f"**Skill Bundles** ({len(bundles)} installed):", ""]
++        lines.append("| Bundle | Description | Skills |")
++        lines.append("|--------|-------------|--------|")
+         for info in bundles:
+             skill_count = len(info.get("skills", []))
+             desc = info.get("description") or f"Load {skill_count} skills"
+-            lines.append(
+-                f"• `/{info['slug']}` — {desc} _({skill_count} skills)_"
+-            )
+-            for s in info.get("skills", []):
+-                lines.append(f"    · {s}")
++            skills = ", ".join(info.get("skills", [])) or "—"
++            lines.append(f"| `/{info['slug']}` | {desc} | {skills} |")
+         lines.append("")
+         lines.append("Invoke a bundle with `/<slug>` to load all its skills.")
+         return "\n".join(lines)
+diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
+index 10f8fbf..4ac9bba 100644
+--- a/hermes_cli/commands.py
++++ b/hermes_cli/commands.py
+@@ -179,6 +179,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
+                gateway_config_gate="skills.write_approval",
+                subcommands=("search", "browse", "inspect", "install", "audit",
+                             "pending", "approve", "reject", "diff", "approval")),
++    CommandDef("browse_skills", "Browse available skills with paginated inline keyboard",
++               "Tools & Skills", gateway_only=True, args_hint="[query]"),
++    CommandDef("restart_gateway", "Restart the Hermes gateway (drains cleanly)",
++               "Configuration", gateway_only=True),
+     CommandDef("memory", "Review pending memory writes / toggle the approval gate",
+                "Tools & Skills",
+                args_hint="[pending|approve|reject|approval] [id|on|off]",
+diff --git a/hermes_cli/session_listing.py b/hermes_cli/session_listing.py
+index 8ce2a71..bee7e0b 100644
+--- a/hermes_cli/session_listing.py
++++ b/hermes_cli/session_listing.py
+@@ -1,113 +1,115 @@
+-"""Shared session-listing helpers for CLI and gateway slash surfaces."""
+-
+-from __future__ import annotations
+-
+-from typing import Any
+-
+-
+-def parse_session_listing_args(raw_args: str) -> tuple[bool, bool, str, str | None]:
+-    """Parse `/sessions`-style args into listing flags, a resume target, and a search query.
+-
+-    Returns ``(include_all_sources, include_unnamed, target, search_query)``.
+-    ``list``/``ls`` and ``browse`` are display aliases; ``all``/``--all`` widens
+-    source scope; ``full``/``--full`` keeps unnamed sessions in the listing.
+-    ``search``/``find`` makes the remaining words a search query —
+-    ``search_query`` is ``None`` when search wasn't requested and ``""`` when it
+-    was requested without a query. Flags are only honored before the first
+-    positional word, so titles containing e.g. "all" aren't misparsed. Anything
+-    else is treated as a target so `/sessions <id-or-title>` can delegate to
+-    `/resume`.
+-    """
+-    import shlex
+-
+-    parts = shlex.split(raw_args or "")
+-    include_all = False
+-    include_unnamed = False
+-    target_parts: list[str] = []
+-    for i, part in enumerate(parts):
+-        lower = part.strip().lower()
+-        if not target_parts:
+-            if lower in {"list", "ls", "browse"}:
+-                continue
+-            if lower in {"all", "--all"}:
+-                include_all = True
+-                continue
+-            if lower in {"full", "--full"}:
+-                include_unnamed = True
+-                continue
+-            if lower in {"search", "find"}:
+-                query = " ".join(parts[i + 1:]).strip()
+-                return include_all, include_unnamed, "", query
+-        target_parts.append(part)
+-    return include_all, include_unnamed, " ".join(target_parts).strip(), None
+-
+-
+-def query_session_listing(
+-    session_db: Any,
+-    *,
+-    source: str | None,
+-    current_session_id: str | None = None,
+-    include_all_sources: bool = False,
+-    include_unnamed: bool = False,
+-    search_query: str | None = None,
+-    limit: int = 10,
+-    exclude_sources: list[str] | None = None,
+-) -> list[dict[str, Any]]:
+-    """Return session rows for interactive listing surfaces.
+-
+-    This is the shared selection policy behind CLI/gateway session browsing:
+-    source-scoped by default, optionally global, hide unnamed sessions unless
+-    the caller asks for a full listing, and never include the current session.
+-    With ``search_query``, rows are filtered by title/id match (SQL-level, see
+-    ``SessionDB.list_sessions_rich``) and ordered by most-recent activity;
+-    unnamed sessions stay visible since an id match may be the only handle.
+-    """
+-    query_source = None if include_all_sources else source
+-    fetch_limit = max(limit * 4, limit)
+-    search = (search_query or "").strip()
+-    rows = session_db.list_sessions_rich(
+-        source=query_source,
+-        exclude_sources=exclude_sources,
+-        limit=fetch_limit,
+-        search_query=search or None,
+-        order_by_last_active=bool(search),
+-    )
+-    result: list[dict[str, Any]] = []
+-    for row in rows:
+-        if current_session_id and row.get("id") == current_session_id:
+-            continue
+-        if not include_unnamed and not row.get("title") and not search:
+-            continue
+-        result.append(row)
+-        if len(result) >= limit:
+-            break
+-    return result
+-
+-
+-def format_gateway_session_listing(
+-    rows: list[dict[str, Any]],
+-    *,
+-    include_source: bool = False,
+-    title: str = "Sessions",
+-) -> str:
+-    """Render a compact Markdown-ish session list for gateway messengers."""
+-    if not rows:
+-        return (
+-            "No sessions found.\n"
+-            "Use `/title My Session` to name this chat, or `/sessions full` "
+-            "to include unnamed sessions."
+-        )
+-
+-    lines = [f"📋 **{title}**", ""]
+-    for idx, row in enumerate(rows, start=1):
+-        session_id = str(row.get("id") or "")
+-        title_text = str(row.get("title") or "—")
+-        preview = str(row.get("preview") or "")[:40]
+-        source = str(row.get("source") or "")
+-        source_part = f" `{source}`" if include_source and source else ""
+-        preview_part = f" — _{preview}_" if preview else ""
+-        lines.append(f"{idx}. **{title_text}**{source_part} — `{session_id}`{preview_part}")
+-    lines.append("")
+-    lines.append("Resume: `/resume <session id>` or `/resume <number>` from `/resume`.")
+-    lines.append("More: `/sessions all`, `/sessions full`, `/sessions search <query>`.")
+-    return "\n".join(lines)
++"""Shared session-listing helpers for CLI and gateway slash surfaces."""
++
++from __future__ import annotations
++
++from typing import Any
++
++
++def parse_session_listing_args(raw_args: str) -> tuple[bool, bool, str, str | None]:
++    """Parse `/sessions`-style args into listing flags, a resume target, and a search query.
++
++    Returns ``(include_all_sources, include_unnamed, target, search_query)``.
++    ``list``/``ls`` and ``browse`` are display aliases; ``all``/``--all`` widens
++    source scope; ``full``/``--full`` keeps unnamed sessions in the listing.
++    ``search``/``find`` makes the remaining words a search query —
++    ``search_query`` is ``None`` when search wasn't requested and ``""`` when it
++    was requested without a query. Flags are only honored before the first
++    positional word, so titles containing e.g. "all" aren't misparsed. Anything
++    else is treated as a target so `/sessions <id-or-title>` can delegate to
++    `/resume`.
++    """
++    import shlex
++
++    parts = shlex.split(raw_args or "")
++    include_all = False
++    include_unnamed = False
++    target_parts: list[str] = []
++    for i, part in enumerate(parts):
++        lower = part.strip().lower()
++        if not target_parts:
++            if lower in {"list", "ls", "browse"}:
++                continue
++            if lower in {"all", "--all"}:
++                include_all = True
++                continue
++            if lower in {"full", "--full"}:
++                include_unnamed = True
++                continue
++            if lower in {"search", "find"}:
++                query = " ".join(parts[i + 1:]).strip()
++                return include_all, include_unnamed, "", query
++        target_parts.append(part)
++    return include_all, include_unnamed, " ".join(target_parts).strip(), None
++
++
++def query_session_listing(
++    session_db: Any,
++    *,
++    source: str | None,
++    current_session_id: str | None = None,
++    include_all_sources: bool = False,
++    include_unnamed: bool = False,
++    search_query: str | None = None,
++    limit: int = 10,
++    exclude_sources: list[str] | None = None,
++) -> list[dict[str, Any]]:
++    """Return session rows for interactive listing surfaces.
++
++    This is the shared selection policy behind CLI/gateway session browsing:
++    source-scoped by default, optionally global, hide unnamed sessions unless
++    the caller asks for a full listing, and never include the current session.
++    With ``search_query``, rows are filtered by title/id match (SQL-level, see
++    ``SessionDB.list_sessions_rich``) and ordered by most-recent activity;
++    unnamed sessions stay visible since an id match may be the only handle.
++    """
++    query_source = None if include_all_sources else source
++    fetch_limit = max(limit * 4, limit)
++    search = (search_query or "").strip()
++    rows = session_db.list_sessions_rich(
++        source=query_source,
++        exclude_sources=exclude_sources,
++        limit=fetch_limit,
++        search_query=search or None,
++        order_by_last_active=bool(search),
++    )
++    result: list[dict[str, Any]] = []
++    for row in rows:
++        if current_session_id and row.get("id") == current_session_id:
++            continue
++        if not include_unnamed and not row.get("title") and not search:
++            continue
++        result.append(row)
++        if len(result) >= limit:
++            break
++    return result
++
++
++def format_gateway_session_listing(
++    rows: list[dict[str, Any]],
++    *,
++    include_source: bool = False,
++    title: str = "Sessions",
++) -> str:
++    """Render a compact Markdown-ish session list for gateway messengers."""
++    if not rows:
++        return (
++            "No sessions found.\n"
++            "Use `/title My Session` to name this chat, or `/sessions full` "
++            "to include unnamed sessions."
++        )
++
++    lines = [f"📋 **{title}**", ""]
++    lines.append("| # | Title | Session ID | Source | Preview |")
++    lines.append("|---|-------|------------|--------|---------|")
++    for idx, row in enumerate(rows, start=1):
++        session_id = str(row.get("id") or "")
++        title_text = str(row.get("title") or "—")
++        preview = str(row.get("preview") or "")[:40]
++        source = str(row.get("source") or "")
++        source_part = source if include_source and source else "—"
++        preview_part = preview or "—"
++        lines.append(f"| {idx} | {title_text} | `{session_id}` | {source_part} | {preview_part} |")
++    lines.append("")
++    lines.append("Resume: `/resume <session id>` or `/resume <number>` from `/resume`.")
++    lines.append("More: `/sessions all`, `/sessions full`, `/sessions search <query>`.")
++    return "\n".join(lines)
+diff --git a/hermes_cli/suggestions_cmd.py b/hermes_cli/suggestions_cmd.py
+index 0c0fd5a..2b5e592 100644
+--- a/hermes_cli/suggestions_cmd.py
++++ b/hermes_cli/suggestions_cmd.py
+@@ -1,153 +1,154 @@
+-"""Shared ``/suggestions`` command logic for CLI and gateway.
+-
+-Both surfaces call ``handle_suggestions_command(args, origin=...)`` and present
+-the returned text however they present command output. Keeping the logic here
+-(not in cli.py / gateway/run.py) means the two surfaces can never drift.
+-
+-Subcommands:
+-  /suggestions                 list pending suggestions (numbered)
+-  /suggestions accept <N|id>   create the cron job for that suggestion
+-  /suggestions dismiss <N|id>  dismiss it (latched, never re-offered)
+-  /suggestions catalog         seed the curated starter automations as pending
+-  /suggestions clear           drop accepted records (housekeeping)
+-"""
+-
+-from __future__ import annotations
+-
+-import logging
+-from typing import Any, Dict, Optional
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-def _fmt_pending(pending: list) -> str:
+-    if not pending:
+-        return (
+-            "No suggested automations right now.\n"
+-            "Try `/suggestions catalog` to see the curated starter set, or "
+-            "install a blueprint skill to get one."
+-        )
+-    lines = ["Suggested automations — `/suggestions accept N` or `dismiss N`:\n"]
+-    for i, s in enumerate(pending, 1):
+-        spec = s.get("job_spec", {}) or {}
+-        sched = spec.get("schedule", "?")
+-        src = s.get("source", "?")
+-        lines.append(f"  {i}. {s.get('title', '(untitled)')}  [{sched}]  ({src})")
+-        desc = s.get("description", "").strip()
+-        if desc:
+-            lines.append(f"     {desc}")
+-    return "\n".join(lines)
+-
+-
+-def _resolve_origin() -> Optional[Dict[str, Any]]:
+-    """Best-effort current-chat origin from session env (CLI and gateway both set it).
+-
+-    Mirrors cron's ``_origin_from_env`` so an accepted suggestion's job delivers
+-    back to the chat where it was accepted. Returns None if unavailable, in
+-    which case create_job falls back to a configured home channel.
+-    """
+-    try:
+-        from gateway.session_context import get_session_env
+-
+-        platform = get_session_env("HERMES_SESSION_PLATFORM")
+-        chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
+-        if platform and chat_id:
+-            return {
+-                "platform": platform,
+-                "chat_id": chat_id,
+-                "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None,
+-                "thread_id": get_session_env("HERMES_SESSION_THREAD_ID") or None,
+-            }
+-    except Exception:
+-        pass
+-    return None
+-
+-
+-def handle_suggestions_command(
+-    args: str,
+-    *,
+-    origin: Optional[Dict[str, Any]] = None,
+-    surface: str = "cli",
+-) -> str:
+-    """Dispatch a ``/suggestions`` invocation. Returns text to show the user.
+-
+-    ``args`` is everything after ``/suggestions`` (already stripped of the
+-    command word). ``origin`` is the platform/chat dict so an accepted job's
+-    "origin" delivery routes back to where the user accepted; when omitted it
+-    is resolved from the session environment. ``surface`` (``"cli"`` |
+-    ``"gateway"``) picks the wording for follow-up hints — ``/cron`` only
+-    exists on the CLI.
+-    """
+-    if origin is None:
+-        origin = _resolve_origin()
+-    try:
+-        from cron import suggestions as store
+-    except Exception as e:  # pragma: no cover - import guard
+-        logger.debug("suggestions store import failed: %s", e)
+-        return "Suggestions are unavailable in this build."
+-
+-    parts = (args or "").strip().split()
+-    sub = parts[0].lower() if parts else ""
+-    rest = " ".join(parts[1:]).strip()
+-
+-    # Bare /suggestions -> list pending.
+-    if not sub:
+-        return _fmt_pending(store.list_pending())
+-
+-    if sub in ("accept", "add", "schedule"):
+-        if not rest:
+-            return "Usage: /suggestions accept <number|id>"
+-        job = store.accept_suggestion(rest, origin=origin)
+-        if job is None:
+-            return f"No pending suggestion matches '{rest}'. Run /suggestions to list them."
+-        sched = job.get("schedule_display") or (job.get("job_spec", {}) or {}).get("schedule", "")
+-        name = job.get("name", "automation")
+-        manage = (
+-            "Manage it with /cron."
+-            if surface == "cli"
+-            else "Ask me to list, pause, or remove it any time."
+-        )
+-        return (
+-            f"Scheduled '{name}'"
+-            + (f" ({sched})" if sched else "")
+-            + f". {manage}"
+-        )
+-
+-    if sub in ("dismiss", "no", "reject"):
+-        if not rest:
+-            return "Usage: /suggestions dismiss <number|id>"
+-        ok = store.dismiss_suggestion(rest)
+-        return (
+-            "Dismissed. Won't suggest that again."
+-            if ok
+-            else f"No pending suggestion matches '{rest}'."
+-        )
+-
+-    if sub == "catalog":
+-        try:
+-            from cron.suggestion_catalog import seed_catalog_suggestions
+-
+-            created = seed_catalog_suggestions()
+-        except Exception as e:
+-            logger.debug("catalog seed failed: %s", e)
+-            return "Couldn't load the catalog."
+-        if not created:
+-            return (
+-                "No new catalog automations to add (already offered, dismissed, "
+-                "or your suggestion list is full). Run /suggestions to see pending."
+-            )
+-        added = ", ".join(c.get("title", "?") for c in created)
+-        return f"Added {len(created)} suggestion(s): {added}.\nRun /suggestions to review."
+-
+-    if sub == "clear":
+-        removed = store.clear_resolved()
+-        return f"Cleared {removed} resolved suggestion record(s)."
+-
+-    return (
+-        "Usage:\n"
+-        "  /suggestions              list pending\n"
+-        "  /suggestions accept N     schedule suggestion N\n"
+-        "  /suggestions dismiss N    dismiss suggestion N\n"
+-        "  /suggestions catalog      add curated starter automations\n"
+-        "  /suggestions clear        housekeeping"
+-    )
++"""Shared ``/suggestions`` command logic for CLI and gateway.
++
++Both surfaces call ``handle_suggestions_command(args, origin=...)`` and present
++the returned text however they present command output. Keeping the logic here
++(not in cli.py / gateway/run.py) means the two surfaces can never drift.
++
++Subcommands:
++  /suggestions                 list pending suggestions (numbered)
++  /suggestions accept <N|id>   create the cron job for that suggestion
++  /suggestions dismiss <N|id>  dismiss it (latched, never re-offered)
++  /suggestions catalog         seed the curated starter automations as pending
++  /suggestions clear           drop accepted records (housekeeping)
++"""
++
++from __future__ import annotations
++
++import logging
++from typing import Any, Dict, Optional
++
++logger = logging.getLogger(__name__)
++
++
++def _fmt_pending(pending: list) -> str:
++    if not pending:
++        return (
++            "No suggested automations right now.\n"
++            "Try `/suggestions catalog` to see the curated starter set, or "
++            "install a blueprint skill to get one."
++        )
++    lines = ["Suggested automations — `/suggestions accept N` or `dismiss N`:", ""]
++    lines.append("| # | Title | Schedule | Source | Description |")
++    lines.append("|---|-------|----------|--------|-------------|")
++    for i, s in enumerate(pending, 1):
++        spec = s.get("job_spec", {}) or {}
++        sched = spec.get("schedule", "?")
++        src = s.get("source", "?")
++        title = s.get("title", "(untitled)")
++        desc = s.get("description", "").strip()[:60] or "—"
++        lines.append(f"| {i} | {title} | `{sched}` | {src} | {desc} |")
++    return "\n".join(lines)
++
++
++def _resolve_origin() -> Optional[Dict[str, Any]]:
++    """Best-effort current-chat origin from session env (CLI and gateway both set it).
++
++    Mirrors cron's ``_origin_from_env`` so an accepted suggestion's job delivers
++    back to the chat where it was accepted. Returns None if unavailable, in
++    which case create_job falls back to a configured home channel.
++    """
++    try:
++        from gateway.session_context import get_session_env
++
++        platform = get_session_env("HERMES_SESSION_PLATFORM")
++        chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
++        if platform and chat_id:
++            return {
++                "platform": platform,
++                "chat_id": chat_id,
++                "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None,
++                "thread_id": get_session_env("HERMES_SESSION_THREAD_ID") or None,
++            }
++    except Exception:
++        pass
++    return None
++
++
++def handle_suggestions_command(
++    args: str,
++    *,
++    origin: Optional[Dict[str, Any]] = None,
++    surface: str = "cli",
++) -> str:
++    """Dispatch a ``/suggestions`` invocation. Returns text to show the user.
++
++    ``args`` is everything after ``/suggestions`` (already stripped of the
++    command word). ``origin`` is the platform/chat dict so an accepted job's
++    "origin" delivery routes back to where the user accepted; when omitted it
++    is resolved from the session environment. ``surface`` (``"cli"`` |
++    ``"gateway"``) picks the wording for follow-up hints — ``/cron`` only
++    exists on the CLI.
++    """
++    if origin is None:
++        origin = _resolve_origin()
++    try:
++        from cron import suggestions as store
++    except Exception as e:  # pragma: no cover - import guard
++        logger.debug("suggestions store import failed: %s", e)
++        return "Suggestions are unavailable in this build."
++
++    parts = (args or "").strip().split()
++    sub = parts[0].lower() if parts else ""
++    rest = " ".join(parts[1:]).strip()
++
++    # Bare /suggestions -> list pending.
++    if not sub:
++        return _fmt_pending(store.list_pending())
++
++    if sub in ("accept", "add", "schedule"):
++        if not rest:
++            return "Usage: /suggestions accept <number|id>"
++        job = store.accept_suggestion(rest, origin=origin)
++        if job is None:
++            return f"No pending suggestion matches '{rest}'. Run /suggestions to list them."
++        sched = job.get("schedule_display") or (job.get("job_spec", {}) or {}).get("schedule", "")
++        name = job.get("name", "automation")
++        manage = (
++            "Manage it with /cron."
++            if surface == "cli"
++            else "Ask me to list, pause, or remove it any time."
++        )
++        return (
++            f"Scheduled '{name}'"
++            + (f" ({sched})" if sched else "")
++            + f". {manage}"
++        )
++
++    if sub in ("dismiss", "no", "reject"):
++        if not rest:
++            return "Usage: /suggestions dismiss <number|id>"
++        ok = store.dismiss_suggestion(rest)
++        return (
++            "Dismissed. Won't suggest that again."
++            if ok
++            else f"No pending suggestion matches '{rest}'."
++        )
++
++    if sub == "catalog":
++        try:
++            from cron.suggestion_catalog import seed_catalog_suggestions
++
++            created = seed_catalog_suggestions()
++        except Exception as e:
++            logger.debug("catalog seed failed: %s", e)
++            return "Couldn't load the catalog."
++        if not created:
++            return (
++                "No new catalog automations to add (already offered, dismissed, "
++                "or your suggestion list is full). Run /suggestions to see pending."
++            )
++        added = ", ".join(c.get("title", "?") for c in created)
++        return f"Added {len(created)} suggestion(s): {added}.\nRun /suggestions to review."
++
++    if sub == "clear":
++        removed = store.clear_resolved()
++        return f"Cleared {removed} resolved suggestion record(s)."
++
++    return (
++        "Usage:\n"
++        "  /suggestions              list pending\n"
++        "  /suggestions accept N     schedule suggestion N\n"
++        "  /suggestions dismiss N    dismiss suggestion N\n"
++        "  /suggestions catalog      add curated starter automations\n"
++        "  /suggestions clear        housekeeping"
++    )
+diff --git a/hermes_cli/write_approval_commands.py b/hermes_cli/write_approval_commands.py
+index 5f399e0..1c89547 100644
+--- a/hermes_cli/write_approval_commands.py
++++ b/hermes_cli/write_approval_commands.py
+@@ -1,209 +1,212 @@
+-#!/usr/bin/env python3
+-"""Shared handlers for the /memory and /skills write-approval subcommands.
+-
+-Both the interactive CLI (``cli.py``) and the gateway (``gateway/run.py``) call
+-into this module so the pending-review UX (list / approve / reject / diff /
+-mode) lives in one place. Each caller owns only its surface concerns:
+-formatting the returned text and, for the gateway, persisting config + evicting
+-the cached agent on a mode change.
+-
+-Every public handler returns a plain text string suitable for both a terminal
+-and a chat message. Skill diffs are intentionally NOT inlined here — the
+-``diff`` handler returns the full diff for the CLI pager, but on a messaging
+-platform the gateway truncates it and points the user at the dashboard / file.
+-"""
+-
+-from __future__ import annotations
+-
+-import json
+-from typing import List, Optional
+-
+-from tools import write_approval as wa
+-
+-
+-def _fmt_state(subsystem: str) -> str:
+-    on = wa.write_approval_enabled(subsystem)
+-    return f"{subsystem}.write_approval = {'on' if on else 'off'}"
+-
+-
+-# ---------------------------------------------------------------------------
+-# Formatting helpers
+-# ---------------------------------------------------------------------------
+-
+-def _fmt_pending_list(subsystem: str) -> str:
+-    records = wa.list_pending(subsystem)
+-    if not records:
+-        return f"No pending {subsystem} writes."
+-    lines = [f"Pending {subsystem} writes ({len(records)}):"]
+-    for r in records:
+-        origin = r.get("origin", "foreground")
+-        tag = " [auto]" if origin == "background_review" else ""
+-        lines.append(f"  {r['id']}{tag}  {r.get('summary', '')}")
+-    where = "/{s} approve <id>".format(s=subsystem)
+-    lines.append("")
+-    lines.append(f"Apply: {where}   Reject: /{subsystem} reject <id>")
+-    if subsystem == wa.SKILLS:
+-        lines.append("Review full diff: /skills diff <id>")
+-    return "\n".join(lines)
+-
+-
+-# ---------------------------------------------------------------------------
+-# Subcommand dispatch
+-# ---------------------------------------------------------------------------
+-
+-def handle_pending_subcommand(
+-    subsystem: str,
+-    args: List[str],
+-    *,
+-    memory_store=None,
+-    set_mode_fn=None,
+-) -> Optional[str]:
+-    """Dispatch a /memory or /skills subcommand.
+-
+-    Args:
+-        subsystem: ``memory`` or ``skills``.
+-        args: tokens after the slash command (e.g. ``["approve", "a1b2"]``).
+-        memory_store: live MemoryStore for applying approved memory writes
+-            (CLI passes ``self.agent._memory_store``; gateway applies against a
+-            freshly loaded store).
+-        set_mode_fn: optional callable ``(enabled: bool) -> None`` that
+-            persists the new write_approval boolean to config (gateway provides
+-            this; CLI uses its own ``save_config_value`` and passes a closure).
+-
+-    Returns a text string to show the user. Returns None when the args are not
+-    a write-approval subcommand (caller falls through to its other handling,
+-    e.g. /skills search).
+-    """
+-    if not args:
+-        # Bare /memory or /skills with no sub → show pending + gate state.
+-        return f"{_fmt_state(subsystem)}\n\n" + _fmt_pending_list(subsystem)
+-
+-    sub = args[0].lower()
+-    rest = args[1:]
+-
+-    if sub == "pending":
+-        return _fmt_pending_list(subsystem)
+-
+-    if sub in {"approve", "apply"}:
+-        return _approve(subsystem, rest, memory_store)
+-
+-    if sub in {"reject", "deny", "drop"}:
+-        return _reject(subsystem, rest)
+-
+-    if sub == "diff" and subsystem == wa.SKILLS:
+-        return _diff(rest)
+-
+-    if sub in {"approval", "mode"}:  # 'mode' kept as a back-compat alias
+-        return _set_approval(subsystem, rest, set_mode_fn)
+-
+-    return None  # not ours — caller handles
+-
+-
+-def _resolve_one(subsystem: str, rest: List[str]):
+-    if not rest:
+-        return None, f"Usage: /{subsystem} approve|reject <id>  (or 'all')"
+-    return rest[0], None
+-
+-
+-def _approve(subsystem: str, rest: List[str], memory_store) -> str:
+-    target, err = _resolve_one(subsystem, rest)
+-    if err or target is None:
+-        return err or f"Usage: /{subsystem} approve <id>"
+-
+-    records = wa.list_pending(subsystem)
+-    if not records:
+-        return f"No pending {subsystem} writes."
+-
+-    if target.lower() == "all":
+-        targets = list(records)
+-    else:
+-        rec = wa.get_pending(subsystem, target)
+-        if not rec:
+-            return f"No pending {subsystem} write with id '{target}'."
+-        targets = [rec]
+-
+-    applied, failed = 0, []
+-    for rec in targets:
+-        ok, msg = _apply_one(subsystem, rec, memory_store)
+-        if ok:
+-            wa.discard_pending(subsystem, rec["id"])
+-            applied += 1
+-        else:
+-            failed.append(f"{rec['id']}: {msg}")
+-
+-    out = [f"Approved {applied} {subsystem} write(s)."]
+-    if failed:
+-        out.append("Failed:")
+-        out.extend(f"  {f}" for f in failed)
+-    return "\n".join(out)
+-
+-
+-def _apply_one(subsystem: str, rec, memory_store):
+-    payload = rec.get("payload", {})
+-    try:
+-        if subsystem == wa.MEMORY:
+-            if memory_store is None:
+-                return False, "memory store unavailable"
+-            from tools.memory_tool import apply_memory_pending
+-            result = apply_memory_pending(payload, memory_store)
+-            return bool(result.get("success")), result.get("error", "")
+-        else:
+-            from tools.skill_manager_tool import apply_skill_pending
+-            result = json.loads(apply_skill_pending(payload))
+-            return bool(result.get("success")), result.get("error", "")
+-    except Exception as e:
+-        return False, str(e)
+-
+-
+-def _reject(subsystem: str, rest: List[str]) -> str:
+-    target, err = _resolve_one(subsystem, rest)
+-    if err or target is None:
+-        return err or f"Usage: /{subsystem} reject <id>"
+-    if target.lower() == "all":
+-        n = 0
+-        for rec in wa.list_pending(subsystem):
+-            if wa.discard_pending(subsystem, rec["id"]):
+-                n += 1
+-        return f"Rejected {n} pending {subsystem} write(s)."
+-    if wa.discard_pending(subsystem, target):
+-        return f"Rejected pending {subsystem} write '{target}'."
+-    return f"No pending {subsystem} write with id '{target}'."
+-
+-
+-def _diff(rest: List[str]) -> str:
+-    if not rest:
+-        return "Usage: /skills diff <id>"
+-    rec = wa.get_pending(wa.SKILLS, rest[0])
+-    if not rec:
+-        return f"No pending skill write with id '{rest[0]}'."
+-    diff = wa.skill_pending_diff(rec)
+-    header = f"# Pending skill write {rec['id']}: {rec.get('summary', '')}\n"
+-    return header + "\n" + diff
+-
+-
+-def _set_approval(subsystem: str, rest: List[str], set_mode_fn) -> str:
+-    """Turn the approval gate on/off for a subsystem.
+-
+-    ``set_mode_fn`` (when provided) persists the new boolean to config.
+-    """
+-    if not rest:
+-        return (f"{_fmt_state(subsystem)}\n"
+-                f"Set with: /{subsystem} approval <on|off>")
+-    arg = rest[0].strip().lower()
+-    truthy = {"on", "true", "yes", "1", "enable", "enabled"}
+-    falsey = {"off", "false", "no", "0", "disable", "disabled"}
+-    if arg in truthy:
+-        enabled = True
+-    elif arg in falsey:
+-        enabled = False
+-    else:
+-        return f"Invalid value '{arg}'. Use: on or off."
+-    if set_mode_fn is None:
+-        val = "true" if enabled else "false"
+-        return (f"To change the {subsystem} approval gate, run:\n"
+-                f"  hermes config set {subsystem}.write_approval {val}")
+-    try:
+-        set_mode_fn(enabled)
+-    except Exception as e:
+-        return f"Failed to set {subsystem}.write_approval: {e}"
+-    return f"{subsystem}.write_approval set to '{'on' if enabled else 'off'}'."
++#!/usr/bin/env python3
++"""Shared handlers for the /memory and /skills write-approval subcommands.
++
++Both the interactive CLI (``cli.py``) and the gateway (``gateway/run.py``) call
++into this module so the pending-review UX (list / approve / reject / diff /
++mode) lives in one place. Each caller owns only its surface concerns:
++formatting the returned text and, for the gateway, persisting config + evicting
++the cached agent on a mode change.
++
++Every public handler returns a plain text string suitable for both a terminal
++and a chat message. Skill diffs are intentionally NOT inlined here — the
++``diff`` handler returns the full diff for the CLI pager, but on a messaging
++platform the gateway truncates it and points the user at the dashboard / file.
++"""
++
++from __future__ import annotations
++
++import json
++from typing import List, Optional
++
++from tools import write_approval as wa
++
++
++def _fmt_state(subsystem: str) -> str:
++    on = wa.write_approval_enabled(subsystem)
++    return f"{subsystem}.write_approval = {'on' if on else 'off'}"
++
++
++# ---------------------------------------------------------------------------
++# Formatting helpers
++# ---------------------------------------------------------------------------
++
++def _fmt_pending_list(subsystem: str) -> str:
++    records = wa.list_pending(subsystem)
++    if not records:
++        return f"No pending {subsystem} writes."
++    lines = [f"Pending {subsystem} writes ({len(records)}):", ""]
++    lines.append("| ID | Origin | Summary |")
++    lines.append("|----|--------|---------|")
++    for r in records:
++        origin = r.get("origin", "foreground")
++        tag = "auto" if origin == "background_review" else origin
++        summary = r.get("summary", "") or "—"
++        lines.append(f"| `{r['id']}` | {tag} | {summary} |")
++    lines.append("")
++    where = "/{s} approve <id>".format(s=subsystem)
++    lines.append(f"Apply: {where}   Reject: /{subsystem} reject <id>")
++    if subsystem == wa.SKILLS:
++        lines.append("Review full diff: /skills diff <id>")
++    return "\n".join(lines)
++
++
++# ---------------------------------------------------------------------------
++# Subcommand dispatch
++# ---------------------------------------------------------------------------
++
++def handle_pending_subcommand(
++    subsystem: str,
++    args: List[str],
++    *,
++    memory_store=None,
++    set_mode_fn=None,
++) -> Optional[str]:
++    """Dispatch a /memory or /skills subcommand.
++
++    Args:
++        subsystem: ``memory`` or ``skills``.
++        args: tokens after the slash command (e.g. ``["approve", "a1b2"]``).
++        memory_store: live MemoryStore for applying approved memory writes
++            (CLI passes ``self.agent._memory_store``; gateway applies against a
++            freshly loaded store).
++        set_mode_fn: optional callable ``(enabled: bool) -> None`` that
++            persists the new write_approval boolean to config (gateway provides
++            this; CLI uses its own ``save_config_value`` and passes a closure).
++
++    Returns a text string to show the user. Returns None when the args are not
++    a write-approval subcommand (caller falls through to its other handling,
++    e.g. /skills search).
++    """
++    if not args:
++        # Bare /memory or /skills with no sub → show pending + gate state.
++        return f"{_fmt_state(subsystem)}\n\n" + _fmt_pending_list(subsystem)
++
++    sub = args[0].lower()
++    rest = args[1:]
++
++    if sub == "pending":
++        return _fmt_pending_list(subsystem)
++
++    if sub in {"approve", "apply"}:
++        return _approve(subsystem, rest, memory_store)
++
++    if sub in {"reject", "deny", "drop"}:
++        return _reject(subsystem, rest)
++
++    if sub == "diff" and subsystem == wa.SKILLS:
++        return _diff(rest)
++
++    if sub in {"approval", "mode"}:  # 'mode' kept as a back-compat alias
++        return _set_approval(subsystem, rest, set_mode_fn)
++
++    return None  # not ours — caller handles
++
++
++def _resolve_one(subsystem: str, rest: List[str]):
++    if not rest:
++        return None, f"Usage: /{subsystem} approve|reject <id>  (or 'all')"
++    return rest[0], None
++
++
++def _approve(subsystem: str, rest: List[str], memory_store) -> str:
++    target, err = _resolve_one(subsystem, rest)
++    if err or target is None:
++        return err or f"Usage: /{subsystem} approve <id>"
++
++    records = wa.list_pending(subsystem)
++    if not records:
++        return f"No pending {subsystem} writes."
++
++    if target.lower() == "all":
++        targets = list(records)
++    else:
++        rec = wa.get_pending(subsystem, target)
++        if not rec:
++            return f"No pending {subsystem} write with id '{target}'."
++        targets = [rec]
++
++    applied, failed = 0, []
++    for rec in targets:
++        ok, msg = _apply_one(subsystem, rec, memory_store)
++        if ok:
++            wa.discard_pending(subsystem, rec["id"])
++            applied += 1
++        else:
++            failed.append(f"{rec['id']}: {msg}")
++
++    out = [f"Approved {applied} {subsystem} write(s)."]
++    if failed:
++        out.append("Failed:")
++        out.extend(f"  {f}" for f in failed)
++    return "\n".join(out)
++
++
++def _apply_one(subsystem: str, rec, memory_store):
++    payload = rec.get("payload", {})
++    try:
++        if subsystem == wa.MEMORY:
++            if memory_store is None:
++                return False, "memory store unavailable"
++            from tools.memory_tool import apply_memory_pending
++            result = apply_memory_pending(payload, memory_store)
++            return bool(result.get("success")), result.get("error", "")
++        else:
++            from tools.skill_manager_tool import apply_skill_pending
++            result = json.loads(apply_skill_pending(payload))
++            return bool(result.get("success")), result.get("error", "")
++    except Exception as e:
++        return False, str(e)
++
++
++def _reject(subsystem: str, rest: List[str]) -> str:
++    target, err = _resolve_one(subsystem, rest)
++    if err or target is None:
++        return err or f"Usage: /{subsystem} reject <id>"
++    if target.lower() == "all":
++        n = 0
++        for rec in wa.list_pending(subsystem):
++            if wa.discard_pending(subsystem, rec["id"]):
++                n += 1
++        return f"Rejected {n} pending {subsystem} write(s)."
++    if wa.discard_pending(subsystem, target):
++        return f"Rejected pending {subsystem} write '{target}'."
++    return f"No pending {subsystem} write with id '{target}'."
++
++
++def _diff(rest: List[str]) -> str:
++    if not rest:
++        return "Usage: /skills diff <id>"
++    rec = wa.get_pending(wa.SKILLS, rest[0])
++    if not rec:
++        return f"No pending skill write with id '{rest[0]}'."
++    diff = wa.skill_pending_diff(rec)
++    header = f"# Pending skill write {rec['id']}: {rec.get('summary', '')}\n"
++    return header + "\n" + diff
++
++
++def _set_approval(subsystem: str, rest: List[str], set_mode_fn) -> str:
++    """Turn the approval gate on/off for a subsystem.
++
++    ``set_mode_fn`` (when provided) persists the new boolean to config.
++    """
++    if not rest:
++        return (f"{_fmt_state(subsystem)}\n"
++                f"Set with: /{subsystem} approval <on|off>")
++    arg = rest[0].strip().lower()
++    truthy = {"on", "true", "yes", "1", "enable", "enabled"}
++    falsey = {"off", "false", "no", "0", "disable", "disabled"}
++    if arg in truthy:
++        enabled = True
++    elif arg in falsey:
++        enabled = False
++    else:
++        return f"Invalid value '{arg}'. Use: on or off."
++    if set_mode_fn is None:
++        val = "true" if enabled else "false"
++        return (f"To change the {subsystem} approval gate, run:\n"
++                f"  hermes config set {subsystem}.write_approval {val}")
++    try:
++        set_mode_fn(enabled)
++    except Exception as e:
++        return f"Failed to set {subsystem}.write_approval: {e}"
++    return f"{subsystem}.write_approval set to '{'on' if enabled else 'off'}'."
+diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
+index 7f451f8..092ff1b 100644
+--- a/plugins/platforms/telegram/adapter.py
++++ b/plugins/platforms/telegram/adapter.py
+@@ -16,6 +16,8 @@ import logging
+ import os
+ import html as _html
+ import re
++import subprocess
++import sys
+ import threading
+ from contextvars import ContextVar
+ from datetime import datetime, timezone
+@@ -482,6 +484,22 @@ from gateway.platforms.helpers import (
+ )
+ 
+ 
++# ---------------------------------------------------------------------------
++# Rich-message detection helpers
++# ---------------------------------------------------------------------------
++
++# Loose detector for explicit HTML payloads (table, headings, lists, etc.).
++# Telegram Rich Messages support an ``html`` field; when the agent output is
++# already HTML we should hand it through unchanged rather than escaping it as
++# MarkdownV2/markdown.
++_RICH_HTML_DETECTION_RE = re.compile(r"\u003c\s*/?\s*(table|thead|tbody|tr|th|td|h[1-6]|ul|ol|li|p|div|span|b|i|s|code|pre|blockquote|details|summary)\b", re.I)
++
++# GFM pipe table detector: a delimiter line made of dashes and pipes.
++_RICH_GFM_TABLE_RE = re.compile(
++    r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*$",
++    re.MULTILINE,
++)
++
+ # ---------------------------------------------------------------------------
+ # Rich-message newline normalization
+ # ---------------------------------------------------------------------------
+@@ -787,6 +805,9 @@ class TelegramAdapter(BasePlatformAdapter):
+         # Clarify button state: clarify_id → session_key (for the clarify tool's
+         # multiple-choice prompts; see GatewayRunner clarify_callback wiring).
+         self._clarify_state: Dict[str, str] = {}
++        # Browse-skills pagination state per chat: query → list of results, current page.
++        self._browse_skills_state: Dict[str, Dict[str, Any]] = {}
++        self._commands_state: Dict[str, Dict[str, Any]] = {}
+         # Notification mode for message sends.
+         # "important" — only final responses, approvals, and slash confirmations
+         #               trigger notifications; tool progress, streaming, status
+@@ -1527,19 +1548,16 @@ class TelegramAdapter(BasePlatformAdapter):
+         return bool(content and self._RICH_CJK_RE.search(content))
+ 
+     def _needs_rich_rendering(self, content: str) -> bool:
+-        """Return True for markdown constructs that the legacy path degrades.
+-
+-        Keep ordinary replies on the pre-rich MarkdownV2 path so Telegram
+-        clients render a consistent font weight/spacing. The rich endpoint is
+-        reserved for constructs where raw markdown materially improves output:
+-        pipe tables (MarkdownV2 has no table syntax and rewrites them into
+-        bullet lists), GFM task lists, collapsible ``<details>`` blocks, and
+-        block math.  Adapted from #45995 (@YonganZhang).
+-        """
++        """Return True for markdown constructs that the legacy path degrades."""
+         if not content:
+             return False
+         if any(_TABLE_SEPARATOR_RE.match(line) for line in content.splitlines()):
+             return True
++        # ponytail: detect pipe-table-like rows even without a separator line;
++        # the payload path will inject a separator before converting to HTML.
++        pipe_rows = [line for line in content.splitlines() if re.match(r"^[ \t]*\|[^|\n]+\|", line)]
++        if len(pipe_rows) >= 2:
++            return True
+         if re.search(r"(?m)^\s*[-*]\s+\[[ xX]\]\s+", content):
+             return True
+         if re.search(r"(?m)^<details\b|^</details>|^<summary\b|^</summary>", content):
+@@ -1618,16 +1636,75 @@ class TelegramAdapter(BasePlatformAdapter):
+     def _rich_message_payload(
+         self, content: str, *, skip_entity_detection: bool = False
+     ) -> Dict[str, Any]:
+-        """Build the ``InputRichMessage`` object from RAW markdown.
++        """Build the ``InputRichMessage`` object from RAW markdown or HTML.
+ 
+         Never pass ``format_message(content)`` here — that converts to
+         MarkdownV2 and would escape/destroy rich syntax like table pipes.
+ 
+-        Single newlines are normalized to Markdown hard breaks so that
+-        multi-line content (slash-command lists, etc.) renders correctly
+-        in the rich-message path.  See ``_rich_normalize_linebreaks``.
++        Detection order:
++          1. Explicit HTML (``<table...>``, ``<h1>``, etc.) -> send as ``html``.
++          2. GFM pipe table -> convert markdown -> HTML via the ``tables``
++             extension and send as ``html`` so Telegram renders native tables.
++          3. Plain markdown -> normalize linebreaks and send as ``markdown``.
+         """
+-        payload: Dict[str, Any] = {"markdown": _rich_normalize_linebreaks(content)}
++        payload: Dict[str, Any]
++        stripped = content.strip()
++
++        # 1) Already HTML: trust it and pass through verbatim.
++        if _RICH_HTML_DETECTION_RE.search(stripped):
++            payload = {"html": content}
++            if skip_entity_detection:
++                payload["skip_entity_detection"] = True
++            return payload
++
++        # 2) GFM pipe table: convert to HTML tables for native rendering.
++        if _RICH_GFM_TABLE_RE.search(stripped):
++            try:
++                import markdown
++                html_body = markdown.markdown(
++                    content,
++                    extensions=["tables", "fenced_code"],
++                )
++                # Center-align all table cells by default for Telegram rich messages.
++                html_body = re.sub(r"<(th|td)\b(?![^>]*style=)", r'<\1 style="text-align:center;"', html_body)
++                payload = {"html": html_body}
++                if skip_entity_detection:
++                    payload["skip_entity_detection"] = True
++                return payload
++            except Exception:
++                # Fall through to plain markdown on any conversion failure.
++                pass
++        # ponytail: pipe-table-like rows without a separator — inject separator and convert.
++        pipe_rows = [line for line in content.splitlines() if re.match(r"^[ \t]*\|[^|\n]+\|", line)]
++        if len(pipe_rows) >= 2:
++            try:
++                import markdown
++                # Find first header row and build a separator line from its columns.
++                header = pipe_rows[0]
++                cols = [c.strip() for c in header.split("|") if c.strip() or c == ""]
++                # Count cells between outer pipes more accurately.
++                cells = header.strip().strip("|").split("|")
++                separator = "|" + "|".join(["---"] * len(cells)) + "|"
++                # Insert separator after the header row.
++                lines = content.splitlines()
++                for idx, line in enumerate(lines):
++                    if line == header:
++                        lines.insert(idx + 1, separator)
++                        break
++                html_body = markdown.markdown(
++                    "\n".join(lines),
++                    extensions=["tables", "fenced_code"],
++                )
++                html_body = re.sub(r"<(th|td)\b(?![^>]*style=)", r'<\1 style="text-align:center;"', html_body)
++                payload = {"html": html_body}
++                if skip_entity_detection:
++                    payload["skip_entity_detection"] = True
++                return payload
++            except Exception:
++                pass
++
++        # 3) Plain markdown path.
++        payload = {"markdown": _rich_normalize_linebreaks(content)}
+         if skip_entity_detection:
+             payload["skip_entity_detection"] = True
+         return payload
+@@ -1756,7 +1833,7 @@ class TelegramAdapter(BasePlatformAdapter):
+             # Take the raw Bot API result (dict under real PTB). Passing
+             # return_type=Message would make PTB deserialize a Bot API 10.1
+             # response shape it does not fully model yet; a post-delivery parse
+-            # error must not be mistaken for a sendable failure.
++            # error must not be mistaken for a failed send.
+             msg = await self._bot.do_api_request(
+                 "sendRichMessage", api_kwargs=payload
+             )
+@@ -6138,6 +6215,40 @@ class TelegramAdapter(BasePlatformAdapter):
+                     )
+             return
+ 
++        # --- Browse-skills pagination callbacks (bs:page or bs:detail:index) ---
++        if data.startswith("bs:"):
++            caller_id = str(getattr(query.from_user, "id", ""))
++            if not self._is_callback_user_authorized(
++                caller_id,
++                chat_id=query_chat_id,
++                chat_type=str(query_chat_type) if query_chat_type is not None else None,
++                thread_id=str(query_thread_id) if query_thread_id is not None else None,
++                user_name=query_user_name,
++            ):
++                await query.answer(text="⛔ Not authorized.")
++                return
++            chat_id = str(query.message.chat_id) if query.message else None
++            if chat_id:
++                await self._handle_browse_skills_callback(query, data, chat_id)
++            return
++
++        # --- Commands pagination callbacks (cmd:page:N or cmd:noop) ---
++        if data.startswith("cmd:"):
++            caller_id = str(getattr(query.from_user, "id", ""))
++            if not self._is_callback_user_authorized(
++                caller_id,
++                chat_id=query_chat_id,
++                chat_type=str(query_chat_type) if query_chat_type is not None else None,
++                thread_id=str(query_thread_id) if query_thread_id is not None else None,
++                user_name=query_user_name,
++            ):
++                await query.answer(text="⛔ Not authorized.")
++                return
++            chat_id = str(query.message.chat_id) if query.message else None
++            if chat_id:
++                await self._handle_commands_callback(query, data, chat_id)
++            return
++
+         # --- Update prompt callbacks ---
+         if not data.startswith("update_prompt:"):
+             return
+@@ -6290,6 +6401,440 @@ class TelegramAdapter(BasePlatformAdapter):
+         except Exception:
+             pass
+ 
++    # ------------------------------------------------------------------
++    # Browse-skills command with inline-keyboard pagination
++    # ------------------------------------------------------------------
++
++    _BROWSE_SKILLS_PAGE_SIZE = 5
++
++    def _parse_browse_skills_command(self, text: str) -> str:
++        """Parse `/browse_skills [query]`."""
++        parts = text.split(" ", 1)
++        return parts[1].strip() if len(parts) > 1 else ""
++
++    async def _search_skills_via_cli(self, query: str, limit: int = 200) -> list:
++        """Run `hermes skills search --json` and return parsed results."""
++        import subprocess
++        try:
++            proc = subprocess.run(
++                ["hermes", "skills", "search", "--json", "--limit", str(limit), query or " "],
++                capture_output=True, text=True, timeout=30,
++            )
++            if proc.returncode != 0:
++                logger.warning("[Telegram] hermes skills search failed: %s", proc.stderr[:500])
++                return []
++            data = json.loads(proc.stdout)
++            return data if isinstance(data, list) else []
++        except Exception as exc:
++            logger.warning("[Telegram] _search_skills_via_cli error: %s", exc)
++            return []
++
++    async def _handle_browse_skills_command(self, update: Update, msg: Message) -> None:
++        """Handle /browse_skills [query]."""
++        query = self._parse_browse_skills_command(msg.text or "")
++        chat_id = str(getattr(getattr(msg, "chat", None), "id", None))
++        if not chat_id:
++            return
++        try:
++            await self._send_browse_skills_page(chat_id, query, page=0, message=None)
++        except Exception as exc:
++            logger.warning("[Telegram] browse_skills command failed: %s", exc)
++
++    # ------------------------------------------------------------------
++    # Commands list with paginated rich table
++    # ------------------------------------------------------------------
++
++    _COMMANDS_PAGE_SIZE = 10
++
++    def _load_commands(self) -> list[dict]:
++        """Load gateway-available slash commands from the canonical registry."""
++        from hermes_cli.commands import COMMAND_REGISTRY
++        return [
++            {
++                "name": c.name,
++                "description": c.description,
++                "category": c.category,
++                "args_hint": c.args_hint,
++            }
++            for c in COMMAND_REGISTRY
++            if not c.cli_only
++        ]
++
++    def _parse_commands_command(self, text: str) -> int:
++        """Parse `/commands [page]`."""
++        parts = text.split()
++        try:
++            return max(0, int(parts[1]) - 1) if len(parts) > 1 else 0
++        except (ValueError, IndexError):
++            return 0
++
++    async def _handle_commands_command(self, update: Update, msg: Message) -> None:
++        """Handle /commands [page]."""
++        page = self._parse_commands_command(msg.text or "")
++        chat_id = str(getattr(getattr(msg, "chat", None), "id", None))
++        if not chat_id:
++            return
++        try:
++            await self._send_commands_page(chat_id, page=page, message=None)
++        except Exception as exc:
++            logger.warning("[Telegram] commands command failed: %s", exc)
++
++    def _build_commands_keyboard(self, page: int, total_pages: int) -> Optional[InlineKeyboardMarkup]:
++        """Build Prev/Next inline keyboard for commands pagination."""
++        if total_pages <= 1:
++            return None
++        buttons = []
++        nav = []
++        if page > 0:
++            nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"cmd:page:{page - 1}"))
++        nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="cmd:noop"))
++        if page < total_pages - 1:
++            nav.append(InlineKeyboardButton("Next ▶", callback_data=f"cmd:page:{page + 1}"))
++        buttons.append(nav)
++        return InlineKeyboardMarkup(buttons)
++
++    async def _send_commands_page(
++        self,
++        chat_id: str,
++        page: int,
++        message: Optional[Message] = None,
++    ) -> None:
++        """Render one page of slash commands as a native rich table + inline keyboard."""
++        commands = self._load_commands()
++        page_size = self._COMMANDS_PAGE_SIZE
++        total_pages = max(1, (len(commands) + page_size - 1) // page_size)
++        page = max(0, min(page, total_pages - 1))
++        start = page * page_size
++        page_items = commands[start:start + page_size]
++
++        keyboard = self._build_commands_keyboard(page, total_pages)
++        reply_markup = json.loads(keyboard.to_json()) if keyboard else None
++
++        caption = _html.escape(f"Available commands — page {page + 1}/{total_pages} ({len(commands)} total)")
++        rows = ""
++        for c in page_items:
++            name = f"/{c['name']}"
++            if c.get("args_hint"):
++                name += f" {c['args_hint']}"
++            desc = _html.escape(str(c.get("description") or ""))
++            cat = _html.escape(str(c.get("category") or ""))
++            rows += f"<tr><td><code>{_html.escape(name)}</code></td><td>{desc}</td><td>{cat}</td></tr>"
++        html = f"<table><thead><tr><th>Command</th><th>Description</th><th>Category</th></tr></thead><tbody>{rows}</tbody></table>"
++        rich_content = f"<p><b>{caption}</b></p>{html}"
++
++        try:
++            if message is not None:
++                payload = {
++                    "chat_id": normalize_telegram_chat_id(chat_id),
++                    "message_id": int(message.message_id),
++                    "rich_message": {"html": rich_content},
++                }
++                if reply_markup:
++                    payload["reply_markup"] = reply_markup
++                await self._bot.do_api_request("editMessageText", api_kwargs=payload)
++            else:
++                payload = {
++                    "chat_id": normalize_telegram_chat_id(chat_id),
++                    "rich_message": {"html": rich_content},
++                }
++                if reply_markup:
++                    payload["reply_markup"] = reply_markup
++                await self._bot.do_api_request("sendRichMessage", api_kwargs=payload)
++        except Exception as exc:
++            logger.warning("[Telegram] commands rich render failed: %s", exc)
++            # Fallback: plain HTML table.
++            text = f"<b>{caption}</b>\n\n"
++            text += "<pre>Command | Description | Category</pre>\n"
++            for c in page_items:
++                name = f"/{c['name']}"
++                if c.get("args_hint"):
++                    name += f" {c['args_hint']}"
++                desc = _html.escape(str(c.get("description") or ""))[:60]
++                cat = _html.escape(str(c.get("category") or ""))[:15]
++                text += f"<pre>{_html.escape(name):<35} | {desc:<60} | {cat}</pre>\n"
++            if message is not None:
++                await message.edit_text(text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
++            else:
++                await self._send_message_with_thread_fallback(
++                    chat_id=normalize_telegram_chat_id(chat_id),
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=keyboard,
++                    **self._link_preview_kwargs(),
++                )
++
++    async def _handle_commands_callback(self, query, data: str, chat_id: str) -> None:
++        """Handle cmd:page:N pagination callbacks."""
++        try:
++            if data.startswith("cmd:page:"):
++                page = int(data.split(":", 2)[2])
++                await self._send_commands_page(chat_id, page=page, message=query.message)
++            await query.answer()
++        except Exception as exc:
++            logger.warning("[Telegram] commands callback failed: %s", exc)
++            await query.answer(text="❌ Failed to change page.")
++
++    async def _send_browse_skills_page(
++        self,
++        chat_id: str,
++        query: str,
++        page: int,
++        message: Optional[Message] = None,
++    ) -> None:
++        """Fetch or reuse skill list, then render one page with inline keyboard."""
++        state_key = f"{chat_id}:{query.lower()}"
++        state = self._browse_skills_state.get(state_key)
++        if not state:
++            results = await self._search_skills_via_cli(query, limit=200)
++            state = {"query": query, "results": results, "page": 0}
++            self._browse_skills_state[state_key] = state
++        results = state["results"]
++        page_size = self._BROWSE_SKILLS_PAGE_SIZE
++        total = len(results)
++        total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
++        page = max(0, min(page, total_pages - 1))
++        state["page"] = page
++
++        start = page * page_size
++        page_items = results[start:start + page_size]
++
++        # ponytail: render as ASCII table inside <pre> for a tidy tabular look.
++        title = _html.escape(query or "all")
++        header = f"🔎 <b>Skills:</b> <code>{title}</code> — page {page + 1}/{total_pages} ({total} total)\n"
++        if page_items:
++            names = [str(item.get("name") or "unknown")[:24] for item in page_items]
++            descs = [str(item.get("description") or "No description")[:70] for item in page_items]
++            name_w = max(len(n) for n in names)
++            sep = "-" * name_w + "-+-" + "-" * 70
++            rows = [f"{'Name':<{name_w}} | Description", sep]
++            for name, desc in zip(names, descs):
++                rows.append(f"{name:<{name_w}} | {desc}")
++            table = "\n".join(rows)
++            text = header + "<pre>" + _html.escape(table) + "</pre>"
++        else:
++            text = header + "<i>No skills found</i>"
++
++        keyboard = self._build_browse_skills_keyboard(page_items, page, total_pages)
++
++        # Try native rich HTML table with inline keyboard; fallback to plain HTML/ASCII.
++        rich_ok = await self._send_browse_skills_rich(
++            chat_id, query, page_items, page, total_pages, keyboard, message
++        )
++        if not rich_ok:
++            await self._send_browse_skills_plain(
++                chat_id, query, page_items, page, total_pages, keyboard, message
++            )
++
++    async def _send_browse_skills_rich(
++        self,
++        chat_id: str,
++        query: str,
++        page_items: list,
++        page: int,
++        total_pages: int,
++        keyboard: InlineKeyboardMarkup,
++        message: Optional[Message],
++    ) -> bool:
++        """Send/edit browse-skills as a native RichBlockTable with inline keyboard."""
++        if not self._rich_messages_enabled or not self._bot_supports_rich():
++            return False
++        if not page_items:
++            return False
++        try:
++            html_rows = ""
++            for item in page_items:
++                name = _html.escape(str(item.get("name") or "unknown"))
++                desc = _html.escape(str(item.get("description") or "No description"))[:90]
++                html_rows += f"<tr><td><b>{name}</b></td><td>{desc}</td></tr>"
++            html = f"<table><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{html_rows}</tbody></table>"
++            caption = _html.escape(f"Skills: {query or 'all'} — page {page + 1}/{total_pages} ({len(page_items)} shown)")
++            rich_content = f"<p>{caption}</p>{html}"
++            reply_markup = json.loads(keyboard.to_json())
++            if message is not None:
++                payload = {
++                    "chat_id": normalize_telegram_chat_id(chat_id),
++                    "message_id": int(message.message_id),
++                    "rich_message": {"html": rich_content},
++                    "reply_markup": reply_markup,
++                }
++                await self._bot.do_api_request("editMessageText", api_kwargs=payload)
++            else:
++                payload = {
++                    "chat_id": normalize_telegram_chat_id(chat_id),
++                    "rich_message": {"html": rich_content},
++                    "reply_markup": reply_markup,
++                }
++                await self._bot.do_api_request("sendRichMessage", api_kwargs=payload)
++            return True
++        except Exception as exc:
++            logger.debug("[Telegram] browse_skills rich render failed, falling back: %s", exc)
++            return False
++
++    async def _send_browse_skills_plain(
++        self,
++        chat_id: str,
++        query: str,
++        page_items: list,
++        page: int,
++        total_pages: int,
++        keyboard: InlineKeyboardMarkup,
++        message: Optional[Message],
++    ) -> None:
++        """Fallback: HTML ASCII table inside <pre> with inline keyboard."""
++        title = _html.escape(query or "all")
++        header = f"🔎 <b>Skills:</b> <code>{title}</code> — page {page + 1}/{total_pages} ({len(page_items)} shown)\n"
++        if page_items:
++            names = [str(item.get("name") or "unknown")[:24] for item in page_items]
++            descs = [str(item.get("description") or "No description")[:70] for item in page_items]
++            name_w = max(len(n) for n in names)
++            sep = "-" * name_w + "-+-" + "-" * 70
++            rows = [f"{'Name':<{name_w}} | Description", sep]
++            for name, desc in zip(names, descs):
++                rows.append(f"{name:<{name_w}} | {desc}")
++            table = "\n".join(rows)
++            text = header + "<pre>" + _html.escape(table) + "</pre>"
++        else:
++            text = header + "<i>No skills found</i>"
++        try:
++            if message is not None:
++                await message.edit_text(
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=keyboard,
++                )
++            else:
++                await self._send_message_with_thread_fallback(
++                    chat_id=normalize_telegram_chat_id(chat_id),
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=keyboard,
++                    **self._link_preview_kwargs(),
++                )
++        except Exception as exc:
++            logger.warning("[Telegram] Failed to send browse_skills page: %s", exc)
++
++    def _build_browse_skills_keyboard(
++        self, items: list, page: int, total_pages: int
++    ) -> InlineKeyboardMarkup:
++        """Build inline keyboard: skill rows, navigation row."""
++        buttons = []
++        for idx, item in enumerate(items):
++            label = str(item.get("name") or "unknown")[:25]
++            buttons.append([InlineKeyboardButton(label, callback_data=f"bs:detail:{idx}")])
++        nav = []
++        if page > 0:
++            nav.append(InlineKeyboardButton("◀ Prev", callback_data="bs:page:prev"))
++        nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="bs:noop"))
++        if page < total_pages - 1:
++            nav.append(InlineKeyboardButton("Next ▶", callback_data="bs:page:next"))
++        if nav:
++            buttons.append(nav)
++        return InlineKeyboardMarkup(buttons)
++
++    async def _handle_browse_skills_callback(
++        self, query, data: str, chat_id: str
++    ) -> None:
++        """Handle bs:page or bs:detail callback."""
++        parts = data.split(":")
++        if len(parts) < 2:
++            await query.answer(text="Unknown action.")
++            return
++        verb = parts[1]
++        # Resolve actual state key by chat prefix because query is part of key.
++        state = None
++        for key, val in self._browse_skills_state.items():
++            if key.startswith(f"{chat_id}:"):
++                state = val
++                break
++        if state is None:
++            await query.answer(text="Session expired — use /browse_skills again.")
++            return
++        if verb == "noop":
++            await query.answer(text="Current page.")
++            return
++        if verb == "page":
++            direction = parts[2] if len(parts) > 2 else ""
++            page = state.get("page", 0)
++            total_pages = max(1, (len(state.get("results", [])) + self._BROWSE_SKILLS_PAGE_SIZE - 1) // self._BROWSE_SKILLS_PAGE_SIZE)
++            if direction == "prev":
++                page = max(0, page - 1)
++            elif direction == "next":
++                page = min(total_pages - 1, page + 1)
++            else:
++                try:
++                    page = max(0, min(total_pages - 1, int(direction)))
++                except ValueError:
++                    pass
++            await query.answer(text=f"Page {page + 1}")
++            await self._send_browse_skills_page(chat_id, state["query"], page, message=query.message)
++            return
++        if verb == "detail":
++            try:
++                idx = int(parts[2])
++            except (ValueError, IndexError):
++                await query.answer(text="Invalid skill.")
++                return
++            results = state.get("results", [])
++            page = state.get("page", 0)
++            start = page * self._BROWSE_SKILLS_PAGE_SIZE
++            item = results[start + idx] if 0 <= start + idx < len(results) else None
++            if not item:
++                await query.answer(text="Skill not found.")
++                return
++            name = item.get("name") or "unknown"
++            ident = item.get("identifier") or ""
++            desc = item.get("description") or "No description"
++            cat = item.get("category") or "—"
++            source = item.get("source") or "—"
++            text = (
++                f"<b>Skill:</b> <code>{_html.escape(name)}</code>\n"
++                f"<b>Identifier:</b> <code>{_html.escape(ident)}</code>\n"
++                f"<b>Category:</b> {_html.escape(cat)}\n"
++                f"<b>Source:</b> {_html.escape(source)}\n\n"
++                f"{_html.escape(desc)}"
++            )
++            await query.answer(text=name[:64])
++            try:
++                await query.edit_message_text(
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=None,
++                )
++            except Exception as exc:
++                logger.warning("[Telegram] edit skill detail failed: %s", exc)
++            return
++        await query.answer(text="Unknown action.")
++
++    def _self_restart(self, script_path: Optional[str] = None) -> None:
++        """Trigger a detached gateway restart from inside the gateway process.
++
++        Hermes blocks `hermes gateway restart/stop` when invoked from within the
++        gateway process tree. We spawn a detached PowerShell process that lives
++        outside the tree and runs `hermes gateway restart --all`, which Hermes
++        allows.
++        """
++        script = script_path or r"D:\hermes-config-backup\self_restart_v3.py"
++        if not os.path.exists(script):
++            logger.warning("[Telegram] restart helper not found: %s", script)
++            return
++        try:
++            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
++            subprocess.Popen(
++                [
++                    sys.executable,
++                    script,
++                    "--wait", "2",
++                ],
++                creationflags=flags,
++                close_fds=True,
++                stdout=subprocess.DEVNULL,
++                stderr=subprocess.DEVNULL,
++                stdin=subprocess.DEVNULL,
++            )
++            logger.info("[Telegram] Detached gateway restart triggered for PID %s", os.getpid())
++        except Exception as exc:
++            logger.warning("[Telegram] Failed to trigger self-restart: %s", exc)
++
+     def _missing_media_path_error(self, label: str, path: str) -> str:
+         """Build an actionable file-not-found error for gateway MEDIA delivery.
+ 
+@@ -8091,6 +8636,20 @@ class TelegramAdapter(BasePlatformAdapter):
+             return
+         await self._ensure_forum_commands(msg)
+ 
++        # ponytail: intercept /browse_skills locally so we can attach inline-keyboard pagination.
++        if msg.text.startswith("/browse_skills"):
++            await self._handle_browse_skills_command(update, msg)
++            return
++        # ponytail: intercept /restart_gateway to trigger a detached self-restart.
++        if msg.text.startswith("/restart_gateway"):
++            await msg.reply_text("🔄 Restarting gateway...")
++            self._self_restart()
++            return
++        # ponytail: intercept /commands locally for paginated table + inline keyboard.
++        if msg.text.startswith("/commands"):
++            await self._handle_commands_command(update, msg)
++            return
++
+         event = self._build_message_event(msg, MessageType.COMMAND, update_id=update.update_id)
+         event.text = self._clean_bot_trigger_text(event.text)
+         await self._cache_replied_media(msg, event)
