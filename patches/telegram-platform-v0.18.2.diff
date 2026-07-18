@@ -89,7 +89,7 @@ index 086150c..3dfe7b1 100644
  
          return "\n".join(lines)
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 9223689..d2b2e5f 100644
+index 9223689..5acfd90 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -698,7 +698,14 @@ class GatewaySlashCommandsMixin:
@@ -108,7 +108,7 @@ index 9223689..d2b2e5f 100644
  
      @staticmethod
      def _redact_matrix_session_key(session_key: str) -> str:
-@@ -707,6 +714,23 @@ class GatewaySlashCommandsMixin:
+@@ -707,6 +714,28 @@ class GatewaySlashCommandsMixin:
          digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
          return f"sha256:{digest}"
  
@@ -119,12 +119,17 @@ index 9223689..d2b2e5f 100644
 +        ponytail: reusable helper so status/usage/credits can all render as
 +        native Telegram rich tables without rewriting each formatter.
 +        """
++        import re as _re
 +        rows: list[str] = []
 +        for line in lines:
 +            if not line or ":" not in line:
 +                continue
 +            key, value = line.split(":", 1)
-+            rows.append(f"| {key.strip()} | {value.strip()} |")
++            # Strip markdown bold/italic/spoiler markers from the key so the
++            # fallback MarkdownV2/plain-text view doesn't show stray stars.
++            key = _re.sub(r"[*_~|]+", "", key).strip()
++            value = value.strip()
++            rows.append(f"| {key} | {value} |")
 +        if not rows:
 +            return "\n".join(lines)
 +        return "\n".join(["| Key | Value |", "|-----|-------|"] + rows)
@@ -132,7 +137,7 @@ index 9223689..d2b2e5f 100644
      def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
          """Best-effort origin lookup for gateway session IDs."""
          lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
-@@ -1081,7 +1105,31 @@ class GatewaySlashCommandsMixin:
+@@ -1081,7 +1110,31 @@ class GatewaySlashCommandsMixin:
              lines.append("")
              lines.append(t("gateway.agents.none"))
  
@@ -165,7 +170,7 @@ index 9223689..d2b2e5f 100644
  
      async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
          """Handle /stop command - interrupt a running agent.
-@@ -1193,28 +1241,22 @@ class GatewaySlashCommandsMixin:
+@@ -1193,28 +1246,22 @@ class GatewaySlashCommandsMixin:
              return None
  
          if action == "list":
@@ -208,7 +213,7 @@ index 9223689..d2b2e5f 100644
              return "\n".join(lines)
  
          if action in {"pause", "resume"}:
-@@ -4102,7 +4144,7 @@ class GatewaySlashCommandsMixin:
+@@ -4102,7 +4149,7 @@ class GatewaySlashCommandsMixin:
              lines.append("")
              lines.append(f"Top up: {view.topup_url}")
              lines.append("Complete your top-up in the browser — credits will appear in /credits shortly.")
@@ -217,7 +222,7 @@ index 9223689..d2b2e5f 100644
  
      def _context_breakdown_lines(self, agent, source) -> list[str]:
          """Render the per-category context breakdown for /usage.
-@@ -4287,7 +4329,7 @@ class GatewaySlashCommandsMixin:
+@@ -4287,7 +4334,7 @@ class GatewaySlashCommandsMixin:
                  lines.append("")
                  lines.extend(credits_lines)
  
@@ -226,7 +231,7 @@ index 9223689..d2b2e5f 100644
  
          # No agent at all -- check session history for a rough count
          session_entry = await self.async_session_store.get_or_create_session(source)
-@@ -4308,7 +4350,7 @@ class GatewaySlashCommandsMixin:
+@@ -4308,7 +4355,7 @@ class GatewaySlashCommandsMixin:
              if credits_lines:
                  lines.append("")
                  lines.extend(credits_lines)
@@ -235,7 +240,7 @@ index 9223689..d2b2e5f 100644
          if account_lines or credits_lines:
              # account-only, credits-only, or both — joined with a blank divider.
              parts = list(account_lines)
-@@ -4316,7 +4358,7 @@ class GatewaySlashCommandsMixin:
+@@ -4316,7 +4363,7 @@ class GatewaySlashCommandsMixin:
                  if parts:
                      parts.append("")
                  parts.extend(credits_lines)
@@ -244,7 +249,7 @@ index 9223689..d2b2e5f 100644
          return t("gateway.usage.no_data")
  
      async def _handle_insights_command(self, event: MessageEvent) -> str:
-@@ -4554,14 +4596,13 @@ class GatewaySlashCommandsMixin:
+@@ -4554,14 +4601,13 @@ class GatewaySlashCommandsMixin:
              )
  
          lines = [f"**Skill Bundles** ({len(bundles)} installed):", ""]
