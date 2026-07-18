@@ -28,14 +28,15 @@ pagination where appropriate.
 ## Install
 
 ```bash
-hermes skills install https://raw.githubusercontent.com/frklstn/hermes-telegram-platform/main/SKILL.md --yes
+hermes skills install https://raw.githubusercontent.com/frklstn/hermes-telegram-platform/main/SKILL.md --name telegram-platform --yes
 ```
 
 ## Apply to this machine
 
-The skill ships a patch set. Run the apply helper from the skill directory:
+The patch set lives in the same repo. Clone it, then run the apply helper:
 
 ```bash
+git clone https://github.com/frklstn/hermes-telegram-platform.git ~/.hermes/skills/telegram-platform
 python3 ~/.hermes/skills/telegram-platform/scripts/apply.py
 hermes gateway restart --all
 ```
