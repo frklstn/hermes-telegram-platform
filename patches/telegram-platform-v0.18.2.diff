@@ -1255,7 +1255,7 @@ index 5f399e0..1c89547 100644
 +        return f"Failed to set {subsystem}.write_approval: {e}"
 +    return f"{subsystem}.write_approval set to '{'on' if enabled else 'off'}'."
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 7f451f8..092ff1b 100644
+index 7f451f8..20ae8f0 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,8 @@ import logging
@@ -1416,7 +1416,66 @@ index 7f451f8..092ff1b 100644
              msg = await self._bot.do_api_request(
                  "sendRichMessage", api_kwargs=payload
              )
-@@ -6138,6 +6215,40 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -3303,12 +3380,58 @@ class TelegramAdapter(BasePlatformAdapter):
+                     "[%s] DM topics setup failed (non-fatal): %s",
+                     self.name, topics_err, exc_info=True,
+                 )
++
++            # ponytail: if we restarted recently, tell the home channel we're back.
++            try:
++                await self._maybe_send_post_restart_status()
++            except Exception:
++                pass
+         except asyncio.CancelledError:
+             raise
+         finally:
+             if self._post_connect_task is asyncio.current_task():
+                 self._post_connect_task = None
+ 
++    def _write_restart_marker(self) -> None:
++        """Leave a marker so the next Telegram connect can announce the restart."""
++        try:
++            marker = Path.home() / ".hermes" / ".telegram_post_restart"
++            marker.write_text(str(time.time()))
++        except Exception:
++            pass
++
++    async def _maybe_send_post_restart_status(self) -> None:
++        """Send a post-restart notice to the Telegram home channel."""
++        marker = Path.home() / ".hermes" / ".telegram_post_restart"
++        if not marker.exists():
++            return
++        try:
++            ts = float(marker.read_text().strip())
++        except Exception:
++            return
++        if time.time() - ts > 300:
++            marker.unlink(missing_ok=True)
++            return
++        home = os.getenv("TELEGRAM_HOME_CHANNEL", "").strip()
++        if not home:
++            return
++        if not self._bot:
++            return
++        text = (
++            f"🔄 Gateway restarted\n"
++            f"PID: `{os.getpid()}`\n"
++            f"Send `/status` for full report."
++        )
++        try:
++            await self._bot.send_message(
++                chat_id=home,
++                text=text,
++                parse_mode=ParseMode.MARKDOWN,
++            )
++            marker.unlink(missing_ok=True)
++        except Exception:
++            pass
++
+     async def connect(self, *, is_reconnect: bool = False) -> bool:
+         """Connect to Telegram via polling or webhook.
+ 
+@@ -6138,6 +6261,40 @@ class TelegramAdapter(BasePlatformAdapter):
                      )
              return
  
@@ -1457,7 +1516,7 @@ index 7f451f8..092ff1b 100644
          # --- Update prompt callbacks ---
          if not data.startswith("update_prompt:"):
              return
-@@ -6290,6 +6401,440 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6290,6 +6447,441 @@ class TelegramAdapter(BasePlatformAdapter):
          except Exception:
              pass
  
@@ -1869,20 +1928,21 @@ index 7f451f8..092ff1b 100644
 +        """Trigger a detached gateway restart from inside the gateway process.
 +
 +        Hermes blocks `hermes gateway restart/stop` when invoked from within the
-+        gateway process tree. We spawn a detached PowerShell process that lives
-+        outside the tree and runs `hermes gateway restart --all`, which Hermes
-+        allows.
++        gateway process tree. We spawn a detached PowerShell process that kills
++        this gateway's PID and then starts a fresh one, living outside the tree.
 +        """
-+        script = script_path or r"D:\hermes-config-backup\self_restart_v3.py"
++        script = script_path or r"D:\hermes-config-backup\self_restart_v4.py"
 +        if not os.path.exists(script):
 +            logger.warning("[Telegram] restart helper not found: %s", script)
 +            return
 +        try:
 +            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
++            self._write_restart_marker()
 +            subprocess.Popen(
 +                [
 +                    sys.executable,
 +                    script,
++                    "--pid", str(os.getpid()),
 +                    "--wait", "2",
 +                ],
 +                creationflags=flags,
@@ -1898,7 +1958,7 @@ index 7f451f8..092ff1b 100644
      def _missing_media_path_error(self, label: str, path: str) -> str:
          """Build an actionable file-not-found error for gateway MEDIA delivery.
  
-@@ -8091,6 +8636,20 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8091,6 +8683,20 @@ class TelegramAdapter(BasePlatformAdapter):
              return
          await self._ensure_forum_commands(msg)
  
